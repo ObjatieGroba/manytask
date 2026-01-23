@@ -9,8 +9,14 @@ RUN pip install uv==${UV_VERSION}
 
 RUN apk add --no-cache build-base
 
-RUN uv sync --locked
+RUN uv export --locked -o requirements.txt
 
+RUN python -m venv /app/.venv
+
+RUN /app/.venv/bin/pip install --no-cache-dir -r requirements.txt
+
+ENV VIRTUAL_ENV=/app/.venv \
+    PATH="/app/.venv/bin:$PATH"
 
 FROM python:3.14-alpine AS app
 
