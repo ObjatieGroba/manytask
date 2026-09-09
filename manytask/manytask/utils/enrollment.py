@@ -18,4 +18,10 @@ def enroll_user_on_course(
     Idempotent: safe to call again for an already enrolled user.
     """
     storage_api.sync_user_on_course(course.course_name, username, course_admin)
-    rms_api.create_project(rms_user, course.gitlab_course_students_group, course.gitlab_course_public_repo)
+    rms_api.create_project(
+        rms_user,
+        course.gitlab_course_students_group,
+        course.gitlab_course_public_repo,
+        course.ci_config_path,
+        course.protected_branches,
+    )

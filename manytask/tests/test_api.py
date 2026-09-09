@@ -22,7 +22,7 @@ from manytask.config import (
     ManytaskGroupConfig,
     ManytaskTaskConfig,
 )
-from manytask.course import CourseStatus
+from manytask.course import CourseStatus, ProtectedBranchSettings
 from manytask.database import DataBaseApi
 from manytask.local_config import TestConfig
 from manytask.mock_auth import MockAuthApi
@@ -325,7 +325,17 @@ def authenticated_client(app, mock_gitlab_oauth):
         rms_user: RmsUser = app.rms_api.register_new_user(
             TEST_USERNAME, TEST_FIRST_NAME, TEST_LAST_NAME, TEST_EMAIL, TEST_PASSWORD
         )
-        app.rms_api.create_project(rms_user, TEST_STUDENTS_GROUP, TEST_PUBLIC_REPO)
+        app.rms_api.create_project(
+            rms_user,
+            TEST_STUDENTS_GROUP,
+            TEST_PUBLIC_REPO,
+            f".gitlab-ci.yml@{TEST_PUBLIC_REPO}",
+            [
+                ProtectedBranchSettings(
+                    name="main", push_access_level="developer", merge_access_level="developer", allow_force_push=True
+                )
+            ],
+        )
 
         mock_authorize_access_token.return_value = {
             "access_token": "test_token",
