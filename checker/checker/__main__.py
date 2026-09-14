@@ -325,12 +325,31 @@ def grade(  # noqa: PLR0913
         print_info(e)
         sys.exit(1)
 
+    # create tester to... to test =)
+    tester = Tester(course, checker_config, verbose=verbose, dry_run=dry_run)
+
+    # skip tasks whose student-editable files are unchanged since the published version
+    # (e.g. a newly pulled task the student has not started yet)
+    skip_unchanged_param = checker_config.testing.skip_unchanged_tasks
+    if skip_unchanged_param:
+        remaining_tasks = []
+        for changed_task in changed_tasks:
+            raw_patterns = tester.get_task_parameters(changed_task).get(skip_unchanged_param, [])
+            patterns = raw_patterns if isinstance(raw_patterns, list) else []
+            patterns = [pattern for pattern in patterns if isinstance(pattern, str)]
+            if exporter.is_task_unchanged(changed_task.relative_path, patterns):
+                print_info(
+                    f"Skipping <{changed_task.name}>: files matching `{skip_unchanged_param}` "
+                    f"are unchanged since the published version",
+                    color="grey",
+                )
+                continue
+            remaining_tasks.append(changed_task)
+        changed_tasks = remaining_tasks
+
     if not changed_tasks:
         print_info("No tasks to test", color="orange")
         return
-
-    # create tester to... to test =)
-    tester = Tester(course, checker_config, verbose=verbose, dry_run=dry_run)
 
     # run tests
     # TODO: progressbar on parallelize

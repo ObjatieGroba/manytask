@@ -161,6 +161,37 @@ deploy-public:
     - python3 -m checker export --commit
 ```
 
+### Optional: an explicit allow-list with `allow_change`
+
+Student-editable files are not a built-in concept — by convention they are listed in a task parameter (commonly
+named `allow_change`), a list of glob patterns relative to the task dir. Set it once for all tasks via
+`default_parameters` in `.checker.yml`, and override it per group/task in `.group.yml`/`.task.yml` when a task
+needs different files editable. It is used by the [`copy_files` plugin](checker_plugins.md) to pick which files
+to collect from the student's repo for testing, and by `testing.skip_unchanged_tasks` (see the
+[reference](checker_yml_reference.md#skip_unchanged_tasks)) to detect a freshly pulled, untouched task:
+
+```yaml
+# .checker.yml
+default_parameters:
+  allow_change: ["solution.c"]
+
+testing:
+  skip_unchanged_tasks: allow_change
+```
+
+```yaml
+# Python/new_task/.task.yml — override for this task only
+version: 1
+parameters:
+  allow_change: ["solution.c", "extra_file.h"]
+```
+
+Without `skip_unchanged_tasks`, a student running `git pull` on the public repo to fetch newly released tasks
+gets those tasks graded immediately against the untouched template `solution.c` — they fail, and with
+`report_on_failure` that failure is reported to manytask as a submission, charging a penalty for a task the
+student hasn't started. With `skip_unchanged_tasks: allow_change` set, `checker grade` compares `solution.c`
+byte-for-byte against the published template and skips grading/reporting for that task instead.
+
 ---
 
 ## CI/CD Variables Setup

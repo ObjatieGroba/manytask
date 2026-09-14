@@ -1,0 +1,163 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import pytest
+from click.testing import CliRunner, Result
+
+from checker.__main__ import cli
+from checker.tester import Tester
+
+CHECKER_YML_NAME = ".checker.yml"
+MANYTASK_YML_NAME = ".manytask.yml"
+
+CHECKER_YML = """
+version: 1
+
+structure:
+  ignore_patterns: [".git"]
+  public_patterns: ["*"]
+  private_patterns: [".*"]
+
+export:
+  destination: https://example.com/public
+  templates: search
+
+testing:
+  changes_detection: last_commit_changes
+"""
+
+CHECKER_YML_WITH_SKIP = CHECKER_YML + "  skip_unchanged_tasks: allow_change\n"
+
+MANYTASK_YML = """
+version: 1
+
+settings:
+  course_name: test
+  gitlab_base_url: https://example.com
+  public_repo: public
+  students_group: students
+
+ui:
+  task_url_template: https://example.com/$GROUP_NAME/$TASK_NAME
+
+deadlines:
+  timezone: Europe/Berlin
+  schedule:
+    - group: group1
+      start: 2020-10-10 00:00:00
+      end: 3000d
+      enabled: true
+      tasks:
+        - task: task_unchanged
+          score: 10
+        - task: task_changed
+          score: 10
+"""
+
+TEMPLATE_CONTENT = "TODO: stub\n"
+SOLVED_CONTENT = "print('real solution')\n"
+
+
+@pytest.fixture()
+def course_root(tmp_path: Path) -> Path:
+    """A course checkout with 2 tasks: `task_unchanged` matches its published template,
+    `task_changed` has an actual solution written by the student.
+
+    `root` and `reference_root` are the same directory here (single-repo setup), so
+    `solution.py` is compared against its `solution.py.template` sibling.
+    """
+    root = tmp_path / "course"
+    root.mkdir()
+
+    (root / CHECKER_YML_NAME).write_text(CHECKER_YML)
+    (root / MANYTASK_YML_NAME).write_text(MANYTASK_YML)
+
+    group_dir = root / "group1"
+    group_dir.mkdir()
+    (group_dir / ".group.yml").write_text("")
+
+    for task, solution in (("task_unchanged", TEMPLATE_CONTENT), ("task_changed", SOLVED_CONTENT)):
+        task_dir = group_dir / task
+        task_dir.mkdir()
+        (task_dir / ".task.yml").write_text('version: 1\nparameters:\n  allow_change: ["solution.py"]\n')
+        (task_dir / "solution.py").write_text(solution)
+        (task_dir / "solution.py.template").write_text(TEMPLATE_CONTENT)
+
+    return root
+
+
+@pytest.fixture()
+def captured_run(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Replace Tester.run with a stub recording the tasks and the report flag."""
+    captured: dict[str, Any] = {}
+
+    def fake_run(
+        self: Tester,
+        origin: Path,
+        tasks: list[Any] | None = None,
+        report: bool = True,
+        timestamp: Any = None,
+    ) -> None:
+        captured["tasks"] = sorted(task.name for task in (tasks or []))
+        captured["report"] = report
+
+    monkeypatch.setattr(Tester, "run", fake_run)
+    return captured
+
+
+@pytest.fixture(autouse=True)
+def detect_changes_from_filesystem(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`course_root` has no `.git`, so `last_commit_changes` detection would fail; use the
+    real, parsed task list (with their `.task.yml` parameters) as "detected changes" instead.
+    """
+    monkeypatch.setattr(
+        "checker.course.Course.detect_changes",
+        lambda self, detection_type: self.get_tasks(enabled=True),
+    )
+
+
+def run_grade(course_root: Path, *args: str) -> Result:
+    return CliRunner().invoke(cli, ["grade", str(course_root), str(course_root), *args])
+
+
+class TestGradeSkipUnchangedTasks:
+    def test_unchanged_task_is_skipped(self, course_root: Path, captured_run: dict[str, Any]) -> None:
+        (course_root / CHECKER_YML_NAME).write_text(CHECKER_YML_WITH_SKIP)
+
+        result = run_grade(course_root)
+
+        assert result.exit_code == 0, result.output
+        assert captured_run["tasks"] == ["task_changed"]
+        assert "Skipping <task_unchanged>" in result.output
+
+    def test_changed_task_is_still_graded_and_reported(self, course_root: Path, captured_run: dict[str, Any]) -> None:
+        (course_root / CHECKER_YML_NAME).write_text(CHECKER_YML_WITH_SKIP)
+
+        result = run_grade(course_root)
+
+        assert result.exit_code == 0, result.output
+        assert "task_changed" in captured_run["tasks"]
+        assert captured_run["report"] is True
+
+    def test_all_tasks_skipped_exits_cleanly(self, course_root: Path, captured_run: dict[str, Any]) -> None:
+        # make the "changed" task unchanged too
+        (course_root / "group1" / "task_changed" / "solution.py").write_text(TEMPLATE_CONTENT)
+        (course_root / CHECKER_YML_NAME).write_text(CHECKER_YML_WITH_SKIP)
+
+        result = run_grade(course_root)
+
+        assert result.exit_code == 0, result.output
+        assert "No tasks to test" in result.output
+        assert "tasks" not in captured_run
+
+    def test_without_skip_unchanged_tasks_nothing_is_skipped(
+        self, course_root: Path, captured_run: dict[str, Any]
+    ) -> None:
+        # course_root already has plain CHECKER_YML (skip_unchanged_tasks unset)
+        result = run_grade(course_root)
+
+        assert result.exit_code == 0, result.output
+        assert captured_run["tasks"] == ["task_changed", "task_unchanged"]
+        assert "Skipping" not in result.output
