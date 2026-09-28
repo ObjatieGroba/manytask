@@ -192,6 +192,10 @@ gets those tasks graded immediately against the untouched template `solution.c` 
 student hasn't started. With `skip_unchanged_tasks: allow_change` set, `checker grade` compares `solution.c`
 byte-for-byte against the published template and skips grading/reporting for that task instead.
 
+With `changes_detection: last_commit_changes` (the default), `checker grade` tests only the tasks touched by the
+pushed commits (diff against `CI_COMMIT_BEFORE_SHA` in GitLab CI, or `--base-ref`; `HEAD~1` otherwise), so a push
+of several commits at once still grades tasks from all of them, not only the last one.
+
 ---
 
 ## CI/CD Variables Setup
